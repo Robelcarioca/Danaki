@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>DANAKIL — Earth's Hellscape</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@200;300;400;600;700&family=Barlow:ital,wght@0,200;0,300;1,200&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --lava:#ff3800;
+  --sulfur:#e8c840;
+  --teal:#00c9be;
+  --acid:#8fcc14;
+  --void:#000;
+  --smoke:#1a1208;
+  --text:#f0e8d8;
+  --f-display:'Bebas Neue',sans-serif;
+  --f-body:'Barlow Condensed',sans-serif;
+}
+
+html{ scroll-behavior:auto; }
+
+body{
+  background:#000;
+  color:var(--text);
+  font-family:var(--f-body);
+  overflow-x:hidden;
+  cursor:none;
+}
+
+/* ─── SCROLL CONTAINER ─── */
+/* The page is tall to give scroll room; sticky panels do the magic */
+#scroll-driver{
+  height:600vh; /* total scroll space */
+  position:relative;
+}
+
+/* ─── STICKY THEATER ─── */
+#theater{
+  position:sticky;
+  top:0;
+  height:100vh;
+  overflow:hidden;
+  background:#000;
+}
+
+/* ─── CANVAS LAYERS ─── */
+/* We paint video frames onto multiple canvases, each shifted in 3D */
+.layer{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+}
+
+#canvas-bg{    z-index:1; }  /* slowest — sky/terrain BG */
+#canvas-mid{   z-index:2; }  /* medium — acid pools */
+#canvas-fg{    z-index:3; }  /* fastest — foreground rocks */
+#canvas-depth{ z-index:4; }  /* depth-map tint overlay */
+
+/* Hidden video source */
+#src-video{
+  position:fixed;
+  top:-9999px;left:-9999px;
+  width:1920px;height:1080px;
+  visibility:hidden;
+  pointer-events:none;
+}
+
+/* ─── PARALLAX WRAPPER (CSS 3D perspective) ─── */
+#parallax-scene{
+  position:absolute;
+  inset:0;
+  perspective:800px;
+  perspective-origin:50% 40%;
+  z-index:5;
+  pointer-events:none;
+}
+
+.p-layer{
+  position:absolute;
+  left:50%; top:50%;
+  transform-origin:center center;
+  will-change:transform;
+}
+
+/* ─── GLITCH & FX OVERLAYS ─── */
+#vignette{
+  position:absolute;inset:0;z-index:10;pointer-events:none;
+  background:radial-gradient(ellipse 80% 60% at 50% 50%, transparent 40%, rgba(0,0,0,.85) 100%);
+}
+
+#scanlines{
+  position:absolute;inset:0;z-index:11;pointer-events:none;
+  background:repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,.15) 2px,
+    rgba(0,0,0,.15) 4px
+  );
+  mix-blend-mode:multiply;
+}
+
+#heat-overlay{
+  position:absolute;inset:0;z-index:12;pointer-events:none;
+  background:linear-gradient(
+    180deg,
+    rgba(255,60,0,0) 0%,
+    rgba(255,60,0,.04) 40%,
+    rgba(255,100,0,.08) 70%,
+    rgba(255,60,0,.04) 100%
+  );
+  animation:heatBreath 3s ease-in-out infinite;
+}
+
+#chromatic{
+  position:absolute;inset:0;z-index:13;pointer-events:none;
+  mix-blend-mode:screen;
+  opacity:.35;
+}
+
+/* ─── NOISE GRAIN ─── */
+#grain{
+  position:absolute;inset:-50%;z-index:14;pointer-events:none;
+  width:200%;height:200%;
+  opacity:.06;
+  animation:grainShift .08s steps(1) infinite;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+  background-size:256px;
+}
+
+/* ─── CURSOR ─── */
+#cursor{
+  position:fixed;z-index:9999;pointer-events:none;
+  width:8px;height:8px;border-radius:50%;
+  background:var(--lava);
+  box-shadow:0 0 12px 4px rgba(255,56,0,.6);
+  transform:translate(-50%,-50%);
+  transition:width .2s,height .2s;
+  mix-blend-mode:screen;
+}
+#cursor-cross{
+  position:fixed;z-index:9998;pointer-events:none;
+  transform:translate(-50%,-50%);
+}
+#cursor-cross::before,#cursor-cross::after{
+  content:'';position:absolute;background:rgba(255,56,0,.5);
+}
+#cursor-cross::before{width:20px;height:1px;top:0;left:-10px}
+#cursor-cross::after{width:1px;height:20px;top:-10px;left:0}
+
+/* ─── DEPTH METER (right side) ─── */
+#depth-meter{
+  position:absolute;right:2.5rem;top:50%;transform:translateY(-50%);
+  z-index:50;display:flex;flex-direction:column;align-items:center;gap:.4rem;
+}
+.depth-tick{
+  width:1px;height:20px;background:rgba(255,56,0,.2);
+  position:relative;transition:background .3s,height .3s;
+}
+.depth-tick.active{background:var(--lava);height:28px;box-shadow:0 0 6px var(--lava)}
+#depth-label{
+  font-family:var(--f-display);font-size:1.8rem;color:var(--lava);
+  text-shadow:0 0 20px rgba(255,56,0,.8);
+  writing-mode:vertical-rl;letter-spacing:.3em;
+  margin-top:.5rem;
+}
+
+/* ─── TELEMETRY HUD (top left) ─── */
+#hud{
+  position:absolute;top:2rem;left:2.5rem;z-index:50;
+  font-family:var(--f-body);font-size:.72rem;font-weight:300;
+  color:rgba(240,232,216,.4);letter-spacing:.12em;
+  display:flex;flex-direction:column;gap:.35rem;
+  text-transform:uppercase;
+}
+.hud-row{display:flex;gap:.75rem;align-items:center}
+.hud-val{color:var(--lava);font-weight:600;min-width:4ch}
+.hud-dot{
+  width:5px;height:5px;border-radius:50%;
+  background:var(--lava);animation:hudBlink 1.2s ease-in-out infinite;
+}
+
+/* ─── SECTION CONTENT (overlaid on theater) ─── */
+#content-overlay{
+  position:absolute;inset:0;z-index:40;
+  display:flex;align-items:center;justify-content:center;
+  pointer-events:none;
+}
+
+/* HERO TEXT */
+#hero-block{
+  text-align:center;
+  transform-style:preserve-3d;
+  transition:opacity .6s,transform .6s;
+}
+#hero-eyebrow{
+  font-family:var(--f-body);font-size:.75rem;font-weight:300;
+  letter-spacing:.5em;text-transform:uppercase;
+  color:rgba(240,232,216,.5);margin-bottom:1.5rem;
+}
+#hero-title{
+  font-family:var(--f-display);
+  font-size:clamp(5rem,14vw,13rem);
+  line-height:.88;
+  letter-spacing:.02em;
+  background:linear-gradient(160deg,#ffffff 0%,#f0d080 35%,#ff6020 60%,#cc2000 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;
+  filter:drop-shadow(0 0 60px rgba(255,80,0,.4));
+}
+#hero-sub{
+  font-family:var(--f-body);font-size:clamp(.9rem,2vw,1.3rem);
+  font-weight:200;letter-spacing:.25em;text-transform:uppercase;
+  color:rgba(240,232,216,.55);margin-top:1.5rem;
+  font-style:italic;
+}
+#hero-cta{
+  display:inline-flex;align-items:center;gap:.75rem;
+  margin-top:3rem;
+  border:1px solid rgba(255,56,0,.5);
+  padding:.8rem 2.5rem;
+  font-family:var(--f-display);font-size:1.2rem;letter-spacing:.2em;
+  color:var(--text);
+  background:rgba(255,56,0,.1);
+  backdrop-filter:blur(4px);
+  cursor:none;
+  transition:background .3s,border-color .3s;
+  pointer-events:all;
+  animation:borderPulse 4s ease-in-out infinite;
+}
+#hero-cta:hover{background:rgba(255,56,0,.25);border-color:var(--lava)}
+.cta-arrow{
+  width:20px;height:1px;background:var(--lava);
+  position:relative;display:inline-block;
+}
+.cta-arrow::after{
+  content:'';position:absolute;right:-1px;top:-3px;
+  width:7px;height:7px;border-right:1px solid var(--lava);border-top:1px solid var(--lava);
+  transform:rotate(45deg);
+}
+
+/* FLOATING SECTIONS — appear as you scroll */
+.float-section{
+  position:absolute;inset:0;z-index:40;
+  display:flex;align-items:center;
+  padding:0 6rem;
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .8s;
+}
+.float-section.active{opacity:1}
+
+.section-number{
+  font-family:var(--f-display);
+  font-size:clamp(8rem,20vw,18rem);
+  color:rgba(255,56,0,.08);
+  position:absolute;
+  right:3rem;top:50%;
+  transform:translateY(-50%);
+  letter-spacing:-.05em;
+  user-select:none;
+  line-height:1;
+}
+
+.section-label{
+  font-family:var(--f-body);font-size:.65rem;font-weight:600;
+  letter-spacing:.4em;text-transform:uppercase;
+  color:var(--lava);margin-bottom:1rem;
+  display:flex;align-items:center;gap:1rem;
+}
+.section-label::before{content:'';width:2.5rem;height:1px;background:var(--lava);display:block}
+
+.section-heading{
+  font-family:var(--f-display);
+  font-size:clamp(3rem,7vw,6.5rem);
+  line-height:.92;
+  letter-spacing:.01em;
+  margin-bottom:1.5rem;
+}
+
+.section-body{
+  font-family:var(--f-body);
+  font-size:clamp(.9rem,1.5vw,1.1rem);
+  font-weight:200;line-height:1.8;
+  color:rgba(240,232,216,.6);
+  max-width:42ch;
+}
+
+.section-stat{
+  margin-top:2.5rem;
+  display:flex;gap:3rem;
+}
+.stat-item{}
+.stat-num{
+  font-family:var(--f-display);
+  font-size:clamp(2rem,4vw,3.5rem);
+  color:var(--lava);
+  line-height:1;
+  text-shadow:0 0 30px rgba(255,56,0,.5);
+}
+.stat-lbl{
+  font-family:var(--f-body);font-size:.7rem;font-weight:300;
+  letter-spacing:.2em;text-transform:uppercase;
+  color:rgba(240,232,216,.4);margin-top:.3rem;
+}
+
+/* ─── PROGRESS BAR ─── */
+#progress-bar{
+  position:absolute;bottom:0;left:0;z-index:50;
+  height:2px;background:var(--lava);width:0%;
+  box-shadow:0 0 8px var(--lava),0 0 20px rgba(255,56,0,.4);
+  transition:width .05s linear;
+}
+
+/* ─── COORDINATE DISPLAY ─── */
+#coords{
+  position:absolute;bottom:2.5rem;left:2.5rem;z-index:50;
+  font-family:var(--f-body);font-size:.65rem;font-weight:300;
+  letter-spacing:.2em;color:rgba(240,232,216,.3);
+  text-transform:uppercase;
+}
+
+/* ─── SCROLL HINT ─── */
+#scroll-hint{
+  position:absolute;bottom:2.5rem;left:50%;transform:translateX(-50%);
+  z-index:50;
+  display:flex;flex-direction:column;align-items:center;gap:.6rem;
+  animation:hintFade 1s ease-in-out 1.5s both, hintBounce 2s ease-in-out 2.5s infinite;
+}
+#scroll-hint span{
+  font-family:var(--f-body);font-size:.6rem;font-weight:300;
+  letter-spacing:.4em;text-transform:uppercase;
+  color:rgba(240,232,216,.35);
+}
+.hint-line{
+  width:1px;height:50px;
+  background:linear-gradient(to bottom,var(--lava),transparent);
+}
+
+/* ─── KEYFRAMES ─── */
+@keyframes heatBreath{
+  0%,100%{opacity:.6}50%{opacity:1}
+}
+@keyframes grainShift{
+  0%{transform:translate(0,0)}
+  10%{transform:translate(-2%,-2%)}
+  20%{transform:translate(2%,-1%)}
+  30%{transform:translate(-1%,2%)}
+  40%{transform:translate(1%,1%)}
+  50%{transform:translate(-2%,1%)}
+  60%{transform:translate(2%,2%)}
+  70%{transform:translate(-1%,-1%)}
+  80%{transform:translate(1%,-2%)}
+  90%{transform:translate(-2%,2%)}
+}
+@keyframes hudBlink{
+  0%,100%{opacity:1}50%{opacity:.2}
+}
+@keyframes borderPulse{
+  0%,100%{border-color:rgba(255,56,0,.5)}
+  50%{border-color:rgba(255,56,0,.9)}
+}
+@keyframes hintFade{
+  from{opacity:0;transform:translateX(-50%) translateY(10px)}
+  to{opacity:1;transform:translateX(-50%) translateY(0)}
+}
+@keyframes hintBounce{
+  0%,100%{transform:translateX(-50%) translateY(0)}
+  50%{transform:translateX(-50%) translateY(8px)}
+}
+@keyframes glitchH{
+  0%,95%,100%{clip-path:inset(0 0 100% 0);transform:translateX(0)}
+  96%{clip-path:inset(20% 0 60% 0);transform:translateX(-4px)}
+  97%{clip-path:inset(50% 0 30% 0);transform:translateX(4px)}
+  98%{clip-path:inset(10% 0 80% 0);transform:translateX(-2px)}
+  99%{clip-path:inset(35% 0 45% 0);transform:translateX(3px)}
+}
+@keyframes depthPulse{
+  0%,100%{text-shadow:0 0 20px rgba(255,56,0,.8)}
+  50%{text-shadow:0 0 40px rgba(255,56,0,1),0 0 80px rgba(255,56,0,.5)}
+}
+
+/* ─── LOADING SCREEN ─── */
+#loader{
+  position:fixed;inset:0;z-index:9999;
+  background:#000;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:2rem;
+  transition:opacity 1s ease;
+}
+#loader.hidden{opacity:0;pointer-events:none}
+#loader-title{
+  font-family:var(--f-display);
+  font-size:clamp(3rem,8vw,7rem);
+  letter-spacing:.1em;
+  background:linear-gradient(135deg,#fff,#ff6020);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+#loader-bar-wrap{
+  width:300px;height:2px;background:rgba(255,56,0,.2);
+  border-radius:1px;overflow:hidden;
+}
+#loader-bar{
+  height:100%;background:var(--lava);
+  box-shadow:0 0 8px var(--lava);
+  width:0%;transition:width .1s linear;
+}
+#loader-status{
+  font-family:var(--f-body);font-size:.7rem;font-weight:300;
+  letter-spacing:.3em;text-transform:uppercase;
+  color:rgba(240,232,216,.4);
+}
+
+/* 3D depth card panel */
+.depth-panel{
+  position:absolute;
+  background:rgba(0,0,0,.6);
+  border:1px solid rgba(255,56,0,.25);
+  backdrop-filter:blur(12px);
+  padding:2rem 2.5rem;
+  transform-style:preserve-3d;
+}
+.depth-panel::before{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(135deg,rgba(255,56,0,.06),transparent 60%);
+  pointer-events:none;
+}
+
+/* Temperature gauge */
+#temp-gauge{
+  position:absolute;bottom:3rem;right:2.5rem;z-index:50;
+  display:flex;flex-direction:column;align-items:center;gap:.5rem;
+}
+#temp-track{
+  width:3px;height:100px;
+  background:rgba(255,255,255,.08);
+  border-radius:2px;
+  position:relative;overflow:hidden;
+}
+#temp-fill{
+  position:absolute;bottom:0;left:0;right:0;
+  background:linear-gradient(to top,var(--lava),var(--sulfur));
+  height:0%;transition:height .3s ease;
+  box-shadow:0 0 8px var(--lava);
+}
+#temp-val{
+  font-family:var(--f-display);font-size:1.4rem;
+  color:var(--sulfur);text-shadow:0 0 15px rgba(232,200,64,.6);
+}
+#temp-lbl{
+  font-family:var(--f-body);font-size:.55rem;font-weight:300;
+  letter-spacing:.2em;text-transform:uppercase;
+  color:rgba(240,232,216,.3);
+}
+
+/* Glitch text overlay */
+#glitch-layer{
+  position:absolute;inset:0;z-index:15;pointer-events:none;overflow:hidden;
+}
+#glitch-inner{
+  position:absolute;inset:0;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--f-display);font-size:clamp(5rem,14vw,13rem);
+  line-height:.88;letter-spacing:.02em;
+  color:rgba(255,56,0,.15);
+  animation:glitchH 8s ease-in-out infinite;
+  user-select:none;
+  mix-blend-mode:screen;
+}
+
+/* Particles canvas */
+#particles{
+  position:absolute;inset:0;z-index:16;pointer-events:none;
+}
+</style>
+</head>
+<body>
+
+<!-- LOADING SCREEN -->
+<div id="loader">
+  <div id="loader-title">DANAKIL</div>
+  <div id="loader-bar-wrap"><div id="loader-bar"></div></div>
+  <div id="loader-status">Decoding video frames…</div>
+</div>
+
+<!-- HIDDEN VIDEO SOURCE -->
+<video id="src-video" muted playsinline preload="auto"
+  src="The_Danakil_Depression__Ethiopia__Exploring_a_Hellscape_on_Earth.mp4"></video>
+
+<!-- SCROLL DRIVER (creates scroll height) -->
+<div id="scroll-driver">
+
+  <!-- STICKY THEATER (stays fixed while scrolling) -->
+  <div id="theater">
+
+    <!-- VIDEO CANVAS LAYERS — painted from video frames -->
+    <canvas class="layer" id="canvas-bg"></canvas>
+    <canvas class="layer" id="canvas-mid"></canvas>
+    <canvas class="layer" id="canvas-fg"></canvas>
+
+    <!-- DEPTH OVERLAY canvas (luminosity depth map tint) -->
+    <canvas class="layer" id="canvas-depth"></canvas>
+
+    <!-- PARTICLES -->
+    <canvas id="particles"></canvas>
+
+    <!-- FX OVERLAYS -->
+    <div id="vignette"></div>
+    <div id="scanlines"></div>
+    <div id="heat-overlay"></div>
+    <canvas id="chromatic" class="layer"></canvas>
+    <div id="grain"></div>
+
+    <!-- GLITCH LAYER -->
+    <div id="glitch-layer">
+      <div id="glitch-inner">DANAKIL</div>
+    </div>
+
+    <!-- HUD -->
+    <div id="hud">
+      <div class="hud-row"><div class="hud-dot"></div><span>FRAME</span><span class="hud-val" id="hud-frame">0000</span></div>
+      <div class="hud-row"><span>DEPTH</span><span class="hud-val" id="hud-depth">-0m</span></div>
+      <div class="hud-row"><span>TEMP</span><span class="hud-val" id="hud-temp">55°C</span></div>
+      <div class="hud-row"><span>ALT</span><span class="hud-val" id="hud-alt">-116m</span></div>
+    </div>
+
+    <!-- DEPTH METER -->
+    <div id="depth-meter">
+      <div id="depth-label">DEPTH</div>
+      <!-- ticks generated by JS -->
+    </div>
+
+    <!-- TEMPERATURE GAUGE -->
+    <div id="temp-gauge">
+      <div id="temp-val">55°C</div>
+      <div id="temp-track"><div id="temp-fill"></div></div>
+      <div id="temp-lbl">Surface</div>
+    </div>
+
+    <!-- ─── CONTENT SECTIONS ─── -->
+
+    <!-- HERO (visible at scroll=0) -->
+    <div id="content-overlay">
+      <div id="hero-block">
+        <div id="hero-eyebrow">Ethiopia · Afar Region · 14.2°N 40.3°E</div>
+        <div id="hero-title">DANAKIL</div>
+        <div id="hero-sub">Earth's Hellscape — 116 metres below sea level</div>
+        <div id="hero-cta">
+          SCROLL TO DESCEND
+          <span class="cta-arrow"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 1 — The Abyss -->
+    <div class="float-section" id="sec1" style="align-items:center">
+      <div style="max-width:560px">
+        <div class="section-label">Chapter 01</div>
+        <h2 class="section-heading">The<br/>Volcanic<br/>Abyss</h2>
+        <p class="section-body">
+          The Danakil Depression sits at the junction of three tectonic plates,
+          tearing apart at 2cm per year. Beneath your feet, magma chambers churn
+          at 1,200°C — separated from the surface by less than 2km of fractured crust.
+        </p>
+        <div class="section-stat">
+          <div class="stat-item"><div class="stat-num">−116m</div><div class="stat-lbl">Below Sea Level</div></div>
+          <div class="stat-item"><div class="stat-num">55°C</div><div class="stat-lbl">Surface Temp</div></div>
+        </div>
+      </div>
+      <div class="section-number">01</div>
+    </div>
+
+    <!-- SECTION 2 — Acid Pools -->
+    <div class="float-section" id="sec2" style="align-items:center;justify-content:flex-end">
+      <div style="max-width:560px;text-align:right">
+        <div class="section-label" style="flex-direction:row-reverse">
+          <span style="display:block;width:2.5rem;height:1px;background:var(--lava)"></span>
+          Chapter 02
+        </div>
+        <h2 class="section-heading">Acid<br/>Pools of<br/>Color</h2>
+        <p class="section-body" style="margin-left:auto">
+          Hydrothermal vents pump superheated brine laced with sulfuric acid —
+          pH levels as low as 0.5. The otherworldly yellows and greens are 
+          colonies of extremophile bacteria surviving conditions lethal to all other life.
+        </p>
+        <div class="section-stat" style="justify-content:flex-end">
+          <div class="stat-item" style="text-align:right"><div class="stat-num">0.5</div><div class="stat-lbl">pH Level</div></div>
+          <div class="stat-item" style="text-align:right"><div class="stat-num">108°C</div><div class="stat-lbl">Brine Temp</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 3 — Erta Ale -->
+    <div class="float-section" id="sec3" style="align-items:flex-end;padding-bottom:6rem">
+      <div style="max-width:560px">
+        <div class="section-label">Chapter 03</div>
+        <h2 class="section-heading">Erta Ale<br/>Lava Lake</h2>
+        <p class="section-body">
+          One of the world's few permanent lava lakes, Erta Ale — the "smoking mountain"
+          in Afar — has been erupting continuously since 1906. Its lava lake surface
+          cools and fractures like broken glass, revealing liquid fire beneath.
+        </p>
+        <div class="section-stat">
+          <div class="stat-item"><div class="stat-num">613m</div><div class="stat-lbl">Summit</div></div>
+          <div class="stat-item"><div class="stat-num">1906</div><div class="stat-lbl">Erupting Since</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 4 — Extremophiles -->
+    <div class="float-section" id="sec4" style="align-items:center;justify-content:center;flex-direction:column;text-align:center">
+      <div class="section-label" style="justify-content:center">Chapter 04</div>
+      <h2 class="section-heading" style="font-size:clamp(4rem,10vw,9rem);text-align:center">Life<br/>Finds a Way</h2>
+      <p class="section-body" style="max-width:55ch;text-align:center;margin:0 auto 2rem">
+        In this impossible environment — acid baths, volcanic gas, extreme heat —
+        microbes not only survive but flourish. Scientists study them as analogues
+        for life on Mars, Europa, and beyond. If life exists here, it can exist anywhere.
+      </p>
+    </div>
+
+    <!-- FINAL — Earth's Mars -->
+    <div class="float-section" id="sec5" style="align-items:center;justify-content:center;flex-direction:column;text-align:center">
+      <div class="section-label" style="justify-content:center">Chapter 05</div>
+      <h2 class="section-heading" style="font-size:clamp(3rem,8vw,7rem);text-align:center;color:var(--lava)">
+        Earth's<br/>Mars
+      </h2>
+      <p class="section-body" style="max-width:50ch;text-align:center;margin:0 auto 3rem">
+        NASA and ESA deploy rovers and test equipment here. The Danakil
+        Depression is the closest thing to another world we have on Earth —
+        a preview of what waits beneath the crust of other planets.
+      </p>
+      <div id="hero-cta" style="pointer-events:all">
+        EXPLORE THE MISSION
+        <span class="cta-arrow"></span>
+      </div>
+    </div>
+
+    <!-- PROGRESS BAR -->
+    <div id="progress-bar"></div>
+
+    <!-- COORDINATES -->
+    <div id="coords">14.2417°N · 40.2957°E · Danakil Depression, Ethiopia</div>
+
+    <!-- SCROLL HINT -->
+    <div id="scroll-hint">
+      <span>scroll</span>
+      <div class="hint-line"></div>
+    </div>
+
+    <!-- CURSOR -->
+    <div id="cursor"></div>
+    <div id="cursor-cross"></div>
+
+  </div><!-- /theater -->
+</div><!-- /scroll-driver -->
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════
+   DANAKIL — Scroll-driven frame-by-frame 3D parallax engine
+   ═══════════════════════════════════════════════════════════════════ */
+
+const video   = document.getElementById('src-video');
+const cBG     = document.getElementById('canvas-bg');
+const cMID    = document.getElementById('canvas-mid');
+const cFG     = document.getElementById('canvas-fg');
+const cDEPTH  = document.getElementById('canvas-depth');
+const cCHRO   = document.getElementById('chromatic');
+const cPART   = document.getElementById('particles');
+
+const ctxBG   = cBG.getContext('2d');
+const ctxMID  = cMID.getContext('2d');
+const ctxFG   = cFG.getContext('2d');
+const ctxD    = cDEPTH.getContext('2d');
+const ctxC    = cCHRO.getContext('2d');
+const ctxP    = cPART.getContext('2d');
+
+const loader     = document.getElementById('loader');
+const loaderBar  = document.getElementById('loader-bar');
+const loaderStat = document.getElementById('loader-status');
+
+/* ── SIZES ── */
+let W, H;
+function resize(){
+  W = window.innerWidth; H = window.innerHeight;
+  [cBG,cMID,cFG,cDEPTH,cCHRO,cPART].forEach(c=>{ c.width=W; c.height=H; });
+  particles.forEach(p=>{p.x=Math.random()*W; p.y=Math.random()*H});
+}
+resize();
+window.addEventListener('resize', resize);
+
+/* ── VIDEO READY ── */
+let videoReady = false;
+let videoDuration = 0;
+
+video.addEventListener('loadedmetadata', ()=>{
+  videoDuration = video.duration;
+  loaderStat.textContent = 'Seeking frames…';
+});
+
+video.addEventListener('canplaythrough', ()=>{
+  videoReady = true;
+  videoDuration = video.duration;
+  loaderBar.style.width = '100%';
+  loaderStat.textContent = 'Ready. Scroll to descend.';
+  setTimeout(()=>{ loader.classList.add('hidden'); }, 800);
+});
+
+// Fake progress while loading
+let fakeP = 0;
+const fakeInterval = setInterval(()=>{
+  if(videoReady){ clearInterval(fakeInterval); return; }
+  fakeP = Math.min(fakeP + Math.random()*4, 90);
+  loaderBar.style.width = fakeP+'%';
+},120);
+
+video.load();
+
+/* ── SCROLL STATE ── */
+let scrollProgress = 0; // 0→1
+let lastScroll = -1;
+let mouseX = 0, mouseY = 0;
+let targetMouseX = 0, targetMouseY = 0;
+
+/* ── SECTION CONFIG ── */
+const SECTIONS = [
+  { id:'hero-block', start:0,    end:.08 },
+  { id:'sec1',       start:.08,  end:.28 },
+  { id:'sec2',       start:.28,  end:.48 },
+  { id:'sec3',       start:.48,  end:.65 },
+  { id:'sec4',       start:.65,  end:.82 },
+  { id:'sec5',       start:.82,  end:1.0  },
+];
+
+/* Scroll hint hides after first scroll */
+let hintHidden = false;
+window.addEventListener('scroll', ()=>{
+  if(!hintHidden && window.scrollY > 50){
+    document.getElementById('scroll-hint').style.opacity='0';
+    hintHidden = true;
+  }
+},{ passive:true });
+
+/* ── PARALLAX OFFSETS per layer ── */
+// Each layer draws the video frame with different scale+translate for 3D depth
+const LAYERS = [
+  // BG layer — minimal motion, slightly zoomed out
+  { scale:1.0, dx:0, dy:0, opacity:1.0, brightness:0.75, saturate:1.0 },
+  // MID layer — medium motion  
+  { scale:1.08, dx:0, dy:0, opacity:0.9, brightness:0.85, saturate:1.15 },
+  // FG layer — fastest motion, zoomed in, high contrast
+  { scale:1.18, dx:0, dy:0, opacity:0.85, brightness:1.0, saturate:1.3 },
+];
+
+/* ── DRAW ONE LAYER ── */
+function drawLayer(ctx, layer, scrollY, mx, my, crop){
+  const w = ctx.canvas.width;
+  const h = ctx.canvas.height;
+  ctx.clearRect(0,0,w,h);
+
+  // Video aspect
+  const vw = video.videoWidth  || 1920;
+  const vh = video.videoHeight || 1080;
+  const vAspect = vw/vh;
+  const cAspect = w/h;
+
+  let drawW, drawH;
+  if(cAspect > vAspect){
+    drawW = w * layer.scale;
+    drawH = drawW / vAspect;
+  } else {
+    drawH = h * layer.scale;
+    drawW = drawH * vAspect;
+  }
+
+  // Parallax offset: mouse + scroll
+  const ox = mx * layer.parallaxStrength * w * 0.04;
+  const oy = my * layer.parallaxStrength * h * 0.025 + scrollY * layer.scrollSpeed * h * 0.08;
+
+  const x = (w - drawW)/2 + ox + layer.dx;
+  const y = (h - drawH)/2 + oy + layer.dy;
+
+  ctx.save();
+  if(layer.brightness !== 1 || layer.saturate !== 1){
+    ctx.filter = `brightness(${layer.brightness}) saturate(${layer.saturate})`;
+  }
+
+  // Optional crop mask (for FG layer we crop top portion)
+  if(crop){
+    ctx.beginPath();
+    ctx.rect(0, crop.y * h, w, (1 - crop.y) * h);
+    ctx.clip();
+  }
+
+  ctx.drawImage(video, x, y, drawW, drawH);
+  ctx.restore();
+}
+
+/* ── DEPTH MAP OVERLAY ── */
+// Creates a fake depth effect: darken edges, tint based on scroll
+function drawDepth(ctx, progress){
+  const w = ctx.canvas.width;
+  const h = ctx.canvas.height;
+  ctx.clearRect(0,0,w,h);
+
+  // Depth gradient — gets more intense as you descend
+  const intensity = progress;
+  
+  // Top atmospheric haze
+  const topGrad = ctx.createLinearGradient(0,0,0,h*0.35);
+  topGrad.addColorStop(0, `rgba(20,8,0,${0.4 + intensity*0.3})`);
+  topGrad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = topGrad;
+  ctx.fillRect(0,0,w,h);
+
+  // Ground heat shimmer at bottom
+  const botGrad = ctx.createLinearGradient(0,h*0.6,0,h);
+  botGrad.addColorStop(0,'rgba(0,0,0,0)');
+  botGrad.addColorStop(0.7,`rgba(255,60,0,${0.04 + intensity*0.08})`);
+  botGrad.addColorStop(1,`rgba(20,5,0,${0.5 + intensity*0.3})`);
+  ctx.fillStyle = botGrad;
+  ctx.fillRect(0,0,w,h);
+
+  // Lateral vignette
+  const lvGrad = ctx.createLinearGradient(0,0,w,0);
+  lvGrad.addColorStop(0,`rgba(0,0,0,${0.3 + intensity*0.15})`);
+  lvGrad.addColorStop(0.15,'rgba(0,0,0,0)');
+  lvGrad.addColorStop(0.85,'rgba(0,0,0,0)');
+  lvGrad.addColorStop(1,`rgba(0,0,0,${0.3 + intensity*0.15})`);
+  ctx.fillStyle = lvGrad;
+  ctx.fillRect(0,0,w,h);
+
+  // Center lava glow at high scroll
+  if(intensity > 0.3){
+    const glowStrength = (intensity - 0.3) / 0.7;
+    const radGrad = ctx.createRadialGradient(w*.5, h*.75, 0, w*.5, h*.75, w*.5);
+    radGrad.addColorStop(0, `rgba(255,60,0,${glowStrength*0.18})`);
+    radGrad.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle = radGrad;
+    ctx.fillRect(0,0,w,h);
+  }
+}
+
+/* ── CHROMATIC ABERRATION ── */
+function drawChromatic(ctx, mx, my, progress){
+  const w = ctx.canvas.width;
+  const h = ctx.canvas.height;
+  ctx.clearRect(0,0,w,h);
+
+  const str = Math.max(0, (progress - 0.2) / 0.8) * 0.06;
+  if(str < 0.001) return;
+
+  // Red channel shift
+  ctx.save();
+  ctx.globalAlpha = str * 0.4;
+  ctx.drawImage(video, -mx*8*str, -my*4*str, w, h);
+  ctx.restore();
+}
+
+/* ── PARTICLES (ash/embers rising) ── */
+const PART_COLORS = ['#ff3800','#ff6a00','#e8c840','#ff8c00','rgba(255,56,0,.4)'];
+const particles = Array.from({length:80},()=>({
+  x: Math.random() * (W||1920),
+  y: Math.random() * (H||1080),
+  vy: -(Math.random()*0.8+0.2),
+  vx: (Math.random()-.5)*0.3,
+  r:  Math.random()*2+0.5,
+  a:  Math.random(),
+  col:PART_COLORS[Math.floor(Math.random()*PART_COLORS.length)],
+  life:Math.random(),
+}));
+
+function drawParticles(ctx, progress){
+  const w = ctx.canvas.width;
+  const h = ctx.canvas.height;
+  ctx.clearRect(0,0,w,h);
+  const density = 0.3 + progress * 0.7; // more particles as you descend
+  for(const p of particles){
+    if(Math.random() > density && p.a < 0.1) continue;
+    ctx.save();
+    ctx.globalAlpha = p.a * 0.7 * density;
+    ctx.fillStyle = p.col;
+    ctx.shadowBlur = 6; ctx.shadowColor = p.col;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+    p.x += p.vx; p.y += p.vy; p.a -= 0.003;
+    if(p.a <= 0 || p.y < -10){
+      p.x = Math.random() * w;
+      p.y = h + 10;
+      p.a = Math.random() * 0.8 + 0.2;
+    }
+  }
+}
+
+/* ── HUD UPDATE ── */
+function updateHUD(progress, frame, totalFrames){
+  const depth = Math.round(progress * 156); // 0 → 156m below
+  const temp  = Math.round(25 + progress * 85); // 25°C → 110°C
+  const alt   = Math.round(-116 - progress * 40);
+  
+  document.getElementById('hud-frame').textContent = String(Math.floor(frame)).padStart(4,'0');
+  document.getElementById('hud-depth').textContent = `-${depth}m`;
+  document.getElementById('hud-temp').textContent  = `${temp}°C`;
+  document.getElementById('hud-alt').textContent   = `${alt}m`;
+
+  // Temperature gauge
+  const fillPct = Math.min(100, progress * 120);
+  document.getElementById('temp-fill').style.height = fillPct+'%';
+  document.getElementById('temp-val').textContent   = temp+'°C';
+  const hue = Math.round(30 - progress * 30); // yellow→red
+  document.getElementById('temp-val').style.color   = `hsl(${hue},100%,60%)`;
+
+  // Depth ticks
+  const ticks = document.querySelectorAll('.depth-tick');
+  const activeIdx = Math.floor(progress * (ticks.length-1));
+  ticks.forEach((t,i)=>t.classList.toggle('active', i <= activeIdx));
+}
+
+/* ── SECTION VISIBILITY ── */
+function updateSections(progress){
+  // Hide hero after scrolling
+  const hero = document.getElementById('hero-block');
+  if(progress < 0.06){
+    hero.style.opacity = 1;
+    hero.style.transform = 'translateY(0) scale(1)';
+  } else {
+    const fade = Math.max(0, 1 - (progress - 0.06)/0.06);
+    hero.style.opacity = fade;
+    hero.style.transform = `translateY(${(1-fade)*-40}px) scale(${0.9+fade*0.1})`;
+  }
+
+  SECTIONS.slice(1).forEach(sec=>{
+    const el = document.getElementById(sec.id);
+    if(!el) return;
+    const span = sec.end - sec.start;
+    const local = (progress - sec.start) / span; // 0→1 within section
+    if(local < 0 || local > 1){ el.classList.remove('active'); return; }
+    el.classList.add('active');
+    // Subtle vertical drift
+    const drift = local < 0.15 ? (local/0.15)*30 - 30 :
+                  local > 0.85 ? -((local-0.85)/0.15)*30 : 0;
+    el.style.transform = `translateY(${drift}px)`;
+  });
+}
+
+/* ── DEPTH METER TICKS (generated once) ── */
+(function buildTicks(){
+  const meter = document.getElementById('depth-meter');
+  for(let i=0;i<20;i++){
+    const t = document.createElement('div');
+    t.className = 'depth-tick';
+    if(i===0) meter.insertBefore(t, document.getElementById('depth-label').nextSibling);
+    else meter.appendChild(t);
+  }
+})();
+
+/* ── CURSOR ── */
+const curEl   = document.getElementById('cursor');
+const crossEl = document.getElementById('cursor-cross');
+window.addEventListener('pointermove',({clientX:x,clientY:y})=>{
+  curEl.style.left   = x+'px'; curEl.style.top   = y+'px';
+  crossEl.style.left = x+'px'; crossEl.style.top = y+'px';
+  targetMouseX = (x/window.innerWidth-.5)*2;
+  targetMouseY = (y/window.innerHeight-.5)*2;
+});
+
+/* ── PROGRESS BAR ── */
+const progressBar = document.getElementById('progress-bar');
+
+/* ── MAIN RENDER LOOP ── */
+function getScrollProgress(){
+  const maxScroll = document.getElementById('scroll-driver').offsetHeight - window.innerHeight;
+  return Math.max(0, Math.min(1, window.scrollY / maxScroll));
+}
+
+let raf;
+function render(){
+  raf = requestAnimationFrame(render);
+
+  // Smooth mouse
+  mouseX += (targetMouseX - mouseX) * 0.06;
+  mouseY += (targetMouseY - mouseY) * 0.06;
+
+  scrollProgress = getScrollProgress();
+  progressBar.style.width = (scrollProgress*100)+'%';
+
+  if(!videoReady || !video.videoWidth) return;
+
+  // ── FRAME SCRUBBING ──
+  // Map scroll progress → video timestamp
+  const targetTime = scrollProgress * videoDuration;
+  
+  // Only seek if meaningfully different (avoid constant seeking overhead)
+  if(Math.abs(video.currentTime - targetTime) > 0.04){
+    video.currentTime = targetTime;
+  }
+
+  const frame = scrollProgress * (videoDuration * 30); // approx frame number
+
+  // ── DRAW LAYERS ──
+  // BG: full frame, slow parallax
+  LAYERS[0].parallaxStrength = 0.3;
+  LAYERS[0].scrollSpeed      = 0.0;
+  LAYERS[0].scale            = 1.05;
+  LAYERS[0].brightness       = 0.7 + scrollProgress*0.2;
+  LAYERS[0].saturate         = 1.0 + scrollProgress*0.3;
+  drawLayer(ctxBG, LAYERS[0], scrollProgress, mouseX, mouseY, null);
+
+  // MID: medium parallax
+  LAYERS[1].parallaxStrength = 0.7;
+  LAYERS[1].scrollSpeed      = 0.0;
+  LAYERS[1].scale            = 1.12 + scrollProgress*0.04;
+  LAYERS[1].brightness       = 0.85 + scrollProgress*0.15;
+  LAYERS[1].saturate         = 1.2 + scrollProgress*0.4;
+  // MID only shows bottom 70% of frame (foreground terrain)
+  ctxMID.clearRect(0,0,W,H);
+  const midGrad = ctxMID.createLinearGradient(0, H*0.15, 0, H*0.45);
+  midGrad.addColorStop(0,'rgba(0,0,0,1)');
+  midGrad.addColorStop(1,'rgba(0,0,0,0)');
+  drawLayer(ctxMID, LAYERS[1], scrollProgress, mouseX, mouseY, {y:0.28});
+  // Fade top edge of mid layer
+  ctxMID.save();
+  ctxMID.globalCompositeOperation = 'destination-out';
+  ctxMID.fillStyle = midGrad;
+  ctxMID.fillRect(0,0,W,H*0.5);
+  ctxMID.restore();
+  ctxMID.save();
+  ctxMID.globalCompositeOperation = 'source-over';
+  ctxMID.globalAlpha = 0.75 + scrollProgress*0.25;
+  ctxMID.restore();
+
+  // FG: fastest parallax — lower strip only
+  LAYERS[2].parallaxStrength = 1.4;
+  LAYERS[2].scrollSpeed      = 0.0;
+  LAYERS[2].scale            = 1.22 + scrollProgress*0.08;
+  LAYERS[2].brightness       = 1.0 + scrollProgress*0.1;
+  LAYERS[2].saturate         = 1.4 + scrollProgress*0.5;
+  drawLayer(ctxFG, LAYERS[2], scrollProgress, mouseX, mouseY, {y:0.55});
+  // Fade FG top
+  const fgGrad = ctxFG.createLinearGradient(0, H*0.5, 0, H*0.72);
+  fgGrad.addColorStop(0,'rgba(0,0,0,1)');
+  fgGrad.addColorStop(1,'rgba(0,0,0,0)');
+  ctxFG.save();
+  ctxFG.globalCompositeOperation = 'destination-out';
+  ctxFG.fillStyle = fgGrad;
+  ctxFG.fillRect(0,0,W,H*0.75);
+  ctxFG.restore();
+
+  // Depth tint
+  drawDepth(ctxD, scrollProgress);
+
+  // Chromatic aberration
+  drawChromatic(ctxC, mouseX, mouseY, scrollProgress);
+
+  // Particles
+  drawParticles(ctxP, scrollProgress);
+
+  // HUD + sections
+  updateHUD(scrollProgress, frame, videoDuration*30);
+  updateSections(scrollProgress);
+}
+
+// Start render loop
+render();
+
+/* ── GLITCH EFFECT: randomly intensifies at high scroll ── */
+setInterval(()=>{
+  const g = document.getElementById('glitch-inner');
+  if(scrollProgress > 0.4 && Math.random() < 0.15){
+    g.style.opacity = (Math.random()*0.3).toString();
+    g.style.transform = `translateX(${(Math.random()-0.5)*20}px)`;
+    setTimeout(()=>{
+      g.style.opacity = '0';
+      g.style.transform = 'translateX(0)';
+    }, 80);
+  }
+},500);
+</script>
+</body>
+</html>
